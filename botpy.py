@@ -76,7 +76,7 @@ async def start(u,x):
 
 async def safe_edit(q, text, **kwargs):
     try:
-        await safe_edit(q, text, **kwargs)
+        await q.edit_message_text(text, **kwargs)
     except BadRequest as e:
         if "Message is not modified" not in str(e):
             raise
@@ -217,4 +217,4 @@ def run():
     a.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text))
     a.run_polling()
 
-if __
+if __name__=="__main__": run()
