@@ -62,8 +62,9 @@ async def text(u,x):
   c=db(); c.execute("UPDATE users SET balance=balance-? WHERE telegram_id=?",(a,i)); c.execute("INSERT INTO withdrawals(telegram_id,amount,wallet,status,created_at) VALUES(?,?,?,?,?)",(i,a,r["wallet"],"pending",datetime.now(timezone.utc).isoformat())); c.commit(); c.close(); x.user_data["state"]=None
   await u.message.reply_text(f"💸 Çekim talebi oluşturuldu: *{a:g} HNK*\nDurum: Bekliyor",parse_mode="Markdown",reply_markup=menu())
 async def main():
- pass
- class HealthHandler(BaseHTTPRequestHandler):
+    pass
+
+class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
@@ -72,14 +73,13 @@ async def main():
     def log_message(self, format, *args):
         pass
 
-
 def run_health_server():
     port = int(os.environ.get("PORT", "10000"))
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
     server.serve_forever()
 
-
 threading.Thread(target=run_health_server, daemon=True).start()
+
 def run():
 
  t=os.getenv("BOT_TOKEN")
