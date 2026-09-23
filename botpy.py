@@ -1,4 +1,6 @@
 import os,re,sqlite3
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
 from datetime import datetime,timezone,timedelta
 from telegram import Update,InlineKeyboardButton,InlineKeyboardMarkup
 from telegram.ext import Application,CommandHandler,CallbackQueryHandler,ContextTypes,MessageHandler,filters
@@ -61,7 +63,25 @@ async def text(u,x):
   await u.message.reply_text(f"💸 Çekim talebi oluşturuldu: *{a:g} HNK*\nDurum: Bekliyor",parse_mode="Markdown",reply_markup=menu())
 async def main():
  pass
+ class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"HNK Mining Bot OK")
+
+    def log_message(self, format, *args):
+        pass
+
+
+def run_health_server():
+    port = int(os.environ.get("PORT", "10000"))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server.serve_forever()
+
+
+threading.Thread(target=run_health_server, daemon=True).start()
 def run():
+
  t=os.getenv("BOT_TOKEN")
  if not t: raise RuntimeError("BOT_TOKEN bulunamadı")
  init(); a=Application.builder().token(t).build(); a.add_handler(CommandHandler("start",start)); a.add_handler(CallbackQueryHandler(buttons)); a.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,text)); a.run_polling()
