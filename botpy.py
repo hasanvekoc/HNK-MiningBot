@@ -985,18 +985,34 @@ async def buttons(u, x):
     # USER MANAGEMENT
     # =====================================================
 
-    elif s == "adm_manage":
+   elif s == "adm_manage":
+        if not is_admin(i):
+            await q.answer(
+                "⛔ Yetkiniz yok.",
+                show_alert=True
+            )
+            return
+
         x.user_data["state"] = "admin_manage"
 
         await safe_edit(
             q,
             "🚫 *KULLANICI YÖNETİMİ*\n\n"
-            "Kullanıcının Telegram ID'sini yaz.\n\n"
+            "Yönetmek istediğin kullanıcının Telegram ID'sini gönder.\n\n"
             "Örnek:\n"
-            "`123456789`",
-            parse_mode="Markdown"
+            "`8769533867`\n\n"
+            "ID'yi mesaj olarak gönder.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "⬅️ Admin",
+                        callback_data="admin"
+                    )
+                ]
+            ])
         )
-
+        return
     # =====================================================
     # WITHDRAWAL LIST
     # =====================================================
