@@ -153,7 +153,18 @@ async def buttons(u, x):
 
     r = user(i)
     s = q.data
-
+if s == "stars":
+        await safe_edit(
+            q,
+            "⭐ *HNK Stars*\n\n"
+            "🌟 HNK Stars sistemi aktif!\n\n"
+            "⭐ Stars: 0\n"
+            "🎁 Stars ile özel ödüller ve avantajlar yakında aktif olacak.\n\n"
+            "🚀 HNK Mining V2",
+            parse_mode="Markdown",
+            reply_markup=menu()
+        )
+        return
     if s == "mine":
         now = datetime.now(timezone.utc)
 
