@@ -367,7 +367,7 @@ async def admin(u, x):
         await u.message.reply_text("⛔ Bu bölüm sadece yöneticiye açıktır.")
         return
 
-await u.message.reply_text(
+    await u.message.reply_text(
         "⚔️ *HNK ADMIN PANEL*\n\n"
         "👑 Yönetici: Hasan\n"
         "🆔 Admin ID: 8769533867\n\n"
@@ -376,6 +376,8 @@ await u.message.reply_text(
         parse_mode="Markdown",
         reply_markup=admin_menu()
     )
+
+
 def run():
     token = os.getenv("BOT_TOKEN")
     if not token:
