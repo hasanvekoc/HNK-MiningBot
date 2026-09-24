@@ -65,7 +65,25 @@ def add(u, ref=None):
         )
     c.commit()
     c.close()
-
+def admin_menu():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("👥 Kullanıcılar", callback_data="adm_users"),
+            InlineKeyboardButton("📊 İstatistik", callback_data="adm_stats")
+        ],
+        [
+            InlineKeyboardButton("💰 Kazım Ayarları", callback_data="adm_mining"),
+            InlineKeyboardButton("🎁 Bonus Ayarları", callback_data="adm_bonus")
+        ],
+        [
+            InlineKeyboardButton("📢 Duyuru Gönder", callback_data="adm_broadcast"),
+            InlineKeyboardButton("🚫 Kullanıcı Yönetimi", callback_data="adm_manage")
+        ],
+        [
+            InlineKeyboardButton("⭐ Stars", callback_data="adm_stars"),
+            InlineKeyboardButton("🔙 Ana Menü", callback_data="back")
+        ]
+    ])
 def menu():
     return InlineKeyboardMarkup([
         [
@@ -154,6 +172,18 @@ async def buttons(u, x):
 
     r = user(i)
     s = q.data
+  if s == "admin":
+        if not is_admin(i):
+            await q.message.reply_text("⛔ Bu bölüm sadece yöneticiye açıktır.")
+            return
+
+        await q.message.reply_text(
+            "🛠 *HNK ADMIN PANELİ*\n\n"
+            "👑 Yönetici: Hasan\n"
+            "🔐 Yönetici yetkileri aktif.",
+            parse_mode="Markdown"
+        )
+        return
     if s == "stars":
         await safe_edit(
             q,
@@ -341,8 +371,11 @@ async def admin(u, x):
         "🛠 *HNK ADMIN PANELİ*\n\n"
         "👑 Yönetici: Hasan\n"
         "🆔 Admin ID: 8769533867\n\n"
-        "🔒 Yönetici yetkileri aktif.",
-        parse_mode="Markdown"
+        "🔐 Yönetici yetkileri aktif.\n\n"
+        "Aşağıdaki menüden işlem seç:",
+        parse_mode="Markdown",
+        reply_markup=admin_menu()
+    )
     )
 def run():
     token = os.getenv("BOT_TOKEN")
