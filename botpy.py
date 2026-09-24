@@ -985,7 +985,7 @@ async def buttons(u, x):
     # USER MANAGEMENT
     # =====================================================
 
-   elif s == "adm_manage":
+    elif s == "adm_manage":
         if not is_admin(i):
             await q.answer(
                 "⛔ Yetkiniz yok.",
