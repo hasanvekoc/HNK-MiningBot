@@ -172,7 +172,7 @@ async def buttons(u, x):
 
     r = user(i)
     s = q.data
-  if s == "admin":
+    if s == "admin":
         if not is_admin(i):
             await q.message.reply_text("⛔ Bu bölüm sadece yöneticiye açıktır.")
             return
