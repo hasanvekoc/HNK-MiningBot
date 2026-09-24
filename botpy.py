@@ -16,8 +16,7 @@ from telegram.ext import (
 )
 
 DB = os.getenv("HNK_DB", "hnk_mining.db")
-
-ADMIN_ID = 8769533867
+ADMIN_ID = int(os.getenv("ADMIN_ID", "8769533867"))
 
 DAILY = 0.25
 BONUS = 1.0
@@ -25,12 +24,8 @@ REF_BONUS = 1.0
 MIN_W = 10.0
 
 
-# =========================================================
-# DATABASE
-# =========================================================
-
 def db():
-    c = sqlite3.connect(DB)
+    c = sqlite3.connect(DB, timeout=30)
     c.row_factory = sqlite3.Row
     return c
 
@@ -42,7 +37,6 @@ def column_exists(c, table, column):
 
 def init():
     c = db()
-
     c.execute("""
         CREATE TABLE IF NOT EXISTS users(
             telegram_id INTEGER PRIMARY KEY,
@@ -55,7 +49,6 @@ def init():
             created_at TEXT
         )
     """)
-
     c.execute("""
         CREATE TABLE IF NOT EXISTS withdrawals(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,34 +59,26 @@ def init():
             created_at TEXT
         )
     """)
-
     c.execute("""
         CREATE TABLE IF NOT EXISTS settings(
             key TEXT PRIMARY KEY,
             value TEXT
         )
     """)
-
-    # Eski database kullananlar için yeni alanlar
     if not column_exists(c, "users", "banned"):
-        c.execute(
-            "ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0"
-        )
+        c.execute("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0")
 
-    # Varsayılan ayarlar
     defaults = {
-        "daily": str(DAILY),
-        "bonus": str(BONUS),
-        "ref_bonus": str(REF_BONUS),
-        "min_withdraw": str(MIN_W),
+        "daily": DAILY,
+        "bonus": BONUS,
+        "ref_bonus": REF_BONUS,
+        "min_withdraw": MIN_W,
     }
-
     for key, value in defaults.items():
         c.execute(
             "INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)",
-            (key, value)
+            (key, str(value)),
         )
-
     c.commit()
     c.close()
 
@@ -102,16 +87,14 @@ def get_setting(key, default):
     c = db()
     r = c.execute(
         "SELECT value FROM settings WHERE key=?",
-        (key,)
+        (key,),
     ).fetchone()
     c.close()
-
     if not r:
         return default
-
     try:
         return float(r["value"])
-    except Exception:
+    except (TypeError, ValueError):
         return default
 
 
@@ -119,7 +102,7 @@ def set_setting(key, value):
     c = db()
     c.execute(
         "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
-        (key, str(value))
+        (key, str(value)),
     )
     c.commit()
     c.close()
@@ -129,66 +112,62 @@ def user(i):
     c = db()
     r = c.execute(
         "SELECT * FROM users WHERE telegram_id=?",
-        (i,)
+        (i,),
     ).fetchone()
     c.close()
     return r
 
 
-def add(u, ref=None):
-    if user(u.id):
+def add(tg_user, ref=None):
+    if user(tg_user.id):
         return
 
     starting_bonus = get_setting("bonus", BONUS)
     referral_bonus = get_setting("ref_bonus", REF_BONUS)
+    now = datetime.now(timezone.utc).isoformat()
 
     c = db()
-
     c.execute(
         """
         INSERT INTO users
-        (telegram_id, username, first_name, balance,
-         last_claim, wallet, referral_count, created_at, banned)
+        (telegram_id, username, first_name, balance, last_claim,
+         wallet, referral_count, created_at, banned)
         VALUES(?,?,?,?,?,?,?,?,?)
         """,
         (
-            u.id,
-            u.username,
-            u.first_name,
+            tg_user.id,
+            tg_user.username,
+            tg_user.first_name,
             starting_bonus,
             None,
             None,
             0,
-            datetime.now(timezone.utc).isoformat(),
+            now,
             0,
-        )
+        ),
     )
 
-    if ref and ref != u.id:
-        c.execute(
-            """
-            UPDATE users
-            SET balance=balance+?,
-                referral_count=referral_count+1
-            WHERE telegram_id=?
-            """,
-            (referral_bonus, ref)
-        )
+    if ref and ref != tg_user.id:
+        ref_user = c.execute(
+            "SELECT telegram_id,banned FROM users WHERE telegram_id=?",
+            (ref,),
+        ).fetchone()
+        if ref_user and not ref_user["banned"]:
+            c.execute(
+                """
+                UPDATE users
+                SET balance=balance+?, referral_count=referral_count+1
+                WHERE telegram_id=?
+                """,
+                (referral_bonus, ref),
+            )
 
     c.commit()
     c.close()
 
 
-# =========================================================
-# HELPERS
-# =========================================================
-
 def is_admin(user_id):
     return user_id == ADMIN_ID
-
-
-def money(value):
-    return f"{float(value):.2f}"
 
 
 async def safe_edit(q, text, **kwargs):
@@ -199,175 +178,104 @@ async def safe_edit(q, text, **kwargs):
             raise
 
 
-# =========================================================
-# USER MENU
-# =========================================================
-
 def menu():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(
-                "⛏️ Madenciliği Başlat",
-                callback_data="mine"
-            ),
-            InlineKeyboardButton(
-                "💰 Bakiyem",
-                callback_data="bal"
-            )
+            InlineKeyboardButton("âï¸ MadenciliÄi BaÅlat", callback_data="mine"),
+            InlineKeyboardButton("ð° Bakiyem", callback_data="bal"),
         ],
         [
-            InlineKeyboardButton(
-                "👥 Arkadaşlarını Davet Et",
-                callback_data="ref"
-            ),
-            InlineKeyboardButton(
-                "👛 Cüzdanım",
-                callback_data="wallet"
-            )
+            InlineKeyboardButton("ð¥ ArkadaÅlarÄ±nÄ± Davet Et", callback_data="ref"),
+            InlineKeyboardButton("ð CÃ¼zdanÄ±m", callback_data="wallet"),
         ],
         [
-            InlineKeyboardButton(
-                "💸 Çekim",
-                callback_data="with"
-            ),
-            InlineKeyboardButton(
-                "⭐ HNK Stars",
-                callback_data="stars"
-            )
+            InlineKeyboardButton("ð¸ Ãekim", callback_data="with"),
+            InlineKeyboardButton("â­ HNK Stars", callback_data="stars"),
         ],
         [
-            InlineKeyboardButton(
-                "📊 İstatistik",
-                callback_data="stats"
-            ),
-            InlineKeyboardButton(
-                "👑 Liderlik",
-                callback_data="lead"
-            )
+            InlineKeyboardButton("ð Ä°statistik", callback_data="stats"),
+            InlineKeyboardButton("ð Liderlik", callback_data="lead"),
         ],
         [
-            InlineKeyboardButton(
-                "ℹ️ HNK Hakkında",
-                callback_data="about"
-            )
-        ]
+            InlineKeyboardButton("â¹ï¸ HNK HakkÄ±nda", callback_data="about"),
+        ],
     ])
 
-
-# =========================================================
-# ADMIN MENU
-# =========================================================
 
 def admin_menu():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(
-                "👥 Kullanıcılar",
-                callback_data="adm_users"
-            ),
-            InlineKeyboardButton(
-                "📊 İstatistik",
-                callback_data="adm_stats"
-            )
+            InlineKeyboardButton("ð¥ KullanÄ±cÄ±lar", callback_data="adm_users"),
+            InlineKeyboardButton("ð Ä°statistik", callback_data="adm_stats"),
         ],
         [
-            InlineKeyboardButton(
-                "💰 Kazım Ayarları",
-                callback_data="adm_mining"
-            ),
-            InlineKeyboardButton(
-                "🎁 Bonus Ayarları",
-                callback_data="adm_bonus"
-            )
+            InlineKeyboardButton("ð° KazÄ±m AyarlarÄ±", callback_data="adm_mining"),
+            InlineKeyboardButton("ð Bonus AyarlarÄ±", callback_data="adm_bonus"),
         ],
         [
-            InlineKeyboardButton(
-                "📢 Duyuru Gönder",
-                callback_data="adm_broadcast"
-            ),
-            InlineKeyboardButton(
-                "🚫 Kullanıcı Yönetimi",
-                callback_data="adm_manage"
-            )
+            InlineKeyboardButton("ð¢ Duyuru GÃ¶nder", callback_data="adm_broadcast"),
+            InlineKeyboardButton("ð« KullanÄ±cÄ± YÃ¶netimi", callback_data="adm_manage"),
         ],
         [
-            InlineKeyboardButton(
-                "💸 Çekim Talepleri",
-                callback_data="adm_withdrawals"
-            ),
-            InlineKeyboardButton(
-                "⭐ Stars",
-                callback_data="adm_stars"
-            )
+            InlineKeyboardButton("ð¸ Ãekim Talepleri", callback_data="adm_withdrawals"),
+            InlineKeyboardButton("â­ Stars", callback_data="adm_stars"),
         ],
         [
-            InlineKeyboardButton(
-                "🔙 Ana Menü",
-                callback_data="back"
-            )
-        ]
+            InlineKeyboardButton("ð Ana MenÃ¼", callback_data="back"),
+        ],
     ])
 
 
-# =========================================================
-# TEXTS
-# =========================================================
-
 START_TEXT = (
-    "🪙 *Hyper Nexus Kingdom — HNK Mining V2*\n\n"
-    "🎁 Başlangıç: *{bonus:g} HNK*\n"
-    "⛏️ Günlük kazım: *{daily:g} HNK*\n"
-    "💸 Minimum çekim: *{minimum:g} HNK*\n\n"
-    "Menüden devam et:"
+    "ðª *Hyper Nexus Kingdom â HNK Mining V2*\n\n"
+    "ð BaÅlangÄ±Ã§: *{bonus:g} HNK*\n"
+    "âï¸ GÃ¼nlÃ¼k kazÄ±m: *{daily:g} HNK*\n"
+    "ð¸ Minimum Ã§ekim: *{minimum:g} HNK*\n\n"
+    "MenÃ¼den devam et:"
 )
-
 
 ABOUT_TEXT = (
-    "🪙 *HYPER NEXUS KINGDOM — HNK*\n\n"
-    "🌐 *Proje:* Topluluk odaklı dijital madencilik ekosistemi\n"
-    "💰 *Toplam Arz:* 1,000,000,000 HNK\n"
-    "🔢 *Ondalık:* 18\n"
-    "💸 *Minimum Çekim:* {minimum:g} HNK\n"
-    "👥 *Referans Sistemi:* Aktif\n"
-    "👛 *BSC/EVM Cüzdan:* Destekleniyor\n\n"
-    "🎯 *Projenin Amacı*\n"
-    "HNK; insanlar, teknoloji ve dijital fırsatları "
-    "bir araya getiren topluluk odaklı bir ekosistem "
-    "oluşturmayı hedefler.\n\n"
-    "🗺️ *Yol Haritası*\n"
-    "✅ Faz 1 — Mining botu ve topluluk\n"
-    "✅ Faz 2 — Cüzdan ve referans sistemi\n"
-    "▫️ Faz 3 — Testnet, likidite ve teknik altyapı\n"
-    "▫️ Faz 4 — Borsa başvuruları ve ekosistem geliştirme\n\n"
-    "📌 *Token Sözleşmesi*\n"
-    "BSC sözleşme adresi yayına alındığında bu bölüme eklenecektir.\n\n"
-    "🔗 *HNK*\n"
-    "People • Technology • Opportunity\n\n"
+    "ðª *HYPER NEXUS KINGDOM â HNK*\n\n"
+    "ð *Proje:* Topluluk odaklÄ± dijital madencilik ekosistemi\n"
+    "ð° *Toplam Arz:* 1,000,000,000 HNK\n"
+    "ð¢ *OndalÄ±k:* 18\n"
+    "ð¸ *Minimum Ãekim:* {minimum:g} HNK\n"
+    "ð¥ *Referans Sistemi:* Aktif\n"
+    "ð *BSC/EVM CÃ¼zdan:* Destekleniyor\n\n"
+    "ð¯ *Projenin AmacÄ±*\n"
+    "HNK; insanlar, teknoloji ve dijital fÄ±rsatlarÄ± "
+    "bir araya getiren topluluk odaklÄ± bir ekosistem "
+    "oluÅturmayÄ± hedefler.\n\n"
+    "ðºï¸ *Yol HaritasÄ±*\n"
+    "â Faz 1 â Mining botu ve topluluk\n"
+    "â Faz 2 â CÃ¼zdan ve referans sistemi\n"
+    "â«ï¸ Faz 3 â Testnet, likidite ve teknik altyapÄ±\n"
+    "â«ï¸ Faz 4 â Borsa baÅvurularÄ± ve ekosistem geliÅtirme\n\n"
+    "ð *Token SÃ¶zleÅmesi*\n"
+    "BSC sÃ¶zleÅme adresi yayÄ±na alÄ±ndÄ±ÄÄ±nda bu bÃ¶lÃ¼me eklenecektir.\n\n"
+    "ð *HNK*\n"
+    "People â¢ Technology â¢ Opportunity\n\n"
     "_A Stronger Tomorrow Together_\n\n"
-    "© 2026 Hyper Nexus Kingdom"
+    "Â©ï¸ 2026 Hyper Nexus Kingdom"
 )
 
 
-# =========================================================
-# START
-# =========================================================
-
 async def start(u, x):
+    tg_user = u.effective_user
     ref = None
 
     if x.args and x.args[0].startswith("ref_"):
         try:
             ref = int(x.args[0][4:])
-        except Exception:
-            pass
+        except (ValueError, TypeError):
+            ref = None
 
-    add(u.effective_user, ref)
+    add(tg_user, ref)
+    r = user(tg_user.id)
 
-    r = user(u.effective_user.id)
-
-    if r and r["banned"]:
+    if r and r["banned"] and not is_admin(tg_user.id):
         await u.message.reply_text(
-            "🚫 Hesabınız yönetici tarafından engellenmiştir."
+            "ð« HesabÄ±nÄ±z yÃ¶netici tarafÄ±ndan engellenmiÅtir."
         )
         return
 
@@ -384,42 +292,31 @@ async def start(u, x):
             minimum=get_setting("min_withdraw", MIN_W),
         ),
         parse_mode="Markdown",
-        reply_markup=menu()
+        reply_markup=menu(),
     )
 
-
-# =========================================================
-# ADMIN
-# =========================================================
 
 async def admin(u, x):
     if not is_admin(u.effective_user.id):
-        await u.message.reply_text(
-            "⛔ Bu bölüm sadece yöneticiye açıktır."
-        )
+        await u.message.reply_text("â Bu bÃ¶lÃ¼m sadece yÃ¶neticiye aÃ§Ä±ktÄ±r.")
         return
 
     await u.message.reply_text(
-        "⚔️ *HNK ADMIN PANEL*\n\n"
-        "👑 Yönetici: Hasan\n"
-        "🆔 Admin ID: 8769533867\n\n"
-        "🔐 Yönetici yetkileri aktif.\n\n"
-        "Aşağıdaki menüden işlem seç:",
+        "âï¸ *HNK ADMIN PANEL*\n\n"
+        "ð YÃ¶netici: Hasan\n"
+        f"ð Admin ID: {ADMIN_ID}\n\n"
+        "ð YÃ¶netici yetkileri aktif.\n\n"
+        "AÅaÄÄ±daki menÃ¼den iÅlem seÃ§:",
         parse_mode="Markdown",
-        reply_markup=admin_menu()
+        reply_markup=admin_menu(),
     )
 
-
-# =========================================================
-# USER BUTTONS
-# =========================================================
 
 async def buttons(u, x):
     q = u.callback_query
     await q.answer()
-
+    s = q.data or ""
     i = q.from_user.id
-    s = q.data
 
     if not user(i):
         add(q.from_user)
@@ -427,224 +324,146 @@ async def buttons(u, x):
     r = user(i)
 
     if r and r["banned"] and not is_admin(i):
-        await q.message.reply_text(
-            "🚫 Hesabınız yönetici tarafından engellenmiştir."
-        )
+        await q.message.reply_text("ð« HesabÄ±nÄ±z yÃ¶netici tarafÄ±ndan engellenmiÅtir.")
         return
 
-    # =====================================================
-    # ADMIN SECURITY
-    # =====================================================
-
-    admin_callbacks = (
-        "adm_",
-        "wd_",
-        "usr_",
-        "admin"
+    admin_only = (
+        s == "admin"
+        or s.startswith("adm_")
+        or s.startswith("wd_")
+        or s.startswith("usr_")
     )
+    if admin_only and not is_admin(i):
+        await q.answer("â Yetkiniz yok.", show_alert=True)
+        return
 
-    if s.startswith(admin_callbacks):
-        if not is_admin(i):
-            await q.answer(
-                "⛔ Yetkiniz yok.",
-                show_alert=True
-            )
-            return
-
-    # =====================================================
     # ADMIN MAIN
-    # =====================================================
-
     if s == "admin":
-        if not is_admin(i):
-            await q.message.reply_text(
-                "⛔ Bu bölüm sadece yöneticiye açıktır."
-            )
-            return
-
         await safe_edit(
             q,
-            "⚔️ *HNK ADMIN PANELİ*\n\n"
-            "👑 Yönetici: Hasan\n"
-            "🔐 Yönetici yetkileri aktif.",
+            "âï¸ *HNK ADMIN PANELÄ°*\n\n"
+            "ð YÃ¶netici: Hasan\n"
+            f"ð Admin ID: {ADMIN_ID}\n"
+            "ð YÃ¶netici yetkileri aktif.",
             parse_mode="Markdown",
-            reply_markup=admin_menu()
+            reply_markup=admin_menu(),
         )
         return
 
-    # =====================================================
-    # STARS
-    # =====================================================
-
-    if s == "stars":
-        await safe_edit(
-            q,
-            "⭐ *HNK Stars*\n\n"
-            "🌟 HNK Stars sistemi aktif!\n\n"
-            "⭐ Stars: 0\n"
-            "🎁 Stars ile özel ödüller ve avantajlar yakında aktif olacak.\n\n"
-            "🚀 HNK Mining V2",
-            parse_mode="Markdown",
-            reply_markup=menu()
-        )
-        return
-
-    # =====================================================
-    # MINING
-    # =====================================================
-
+    # USER MENU
     if s == "mine":
         now = datetime.now(timezone.utc)
         daily = get_setting("daily", DAILY)
 
         if r["last_claim"]:
-            last = datetime.fromisoformat(r["last_claim"])
+            try:
+                last = datetime.fromisoformat(r["last_claim"])
+            except ValueError:
+                last = None
 
-            if now - last < timedelta(hours=24):
+            if last and now - last < timedelta(hours=24):
                 left = timedelta(hours=24) - (now - last)
-
                 await safe_edit(
                     q,
-                    f"⏳ Sonraki kazım: "
+                    f"â³ Sonraki kazÄ±m: "
                     f"{int(left.total_seconds() // 3600)} saat "
                     f"{int(left.total_seconds() % 3600 // 60)} dakika",
-                    reply_markup=menu()
+                    reply_markup=menu(),
                 )
                 return
 
         c = db()
-
         c.execute(
             """
             UPDATE users
-            SET balance=balance+?,
-                last_claim=?
+            SET balance=balance+?, last_claim=?
             WHERE telegram_id=?
             """,
-            (daily, now.isoformat(), i)
+            (daily, now.isoformat(), i),
         )
-
         c.commit()
         c.close()
 
         new_balance = user(i)["balance"]
-
         await safe_edit(
             q,
-            f"⛏️ *Kazım başarılı!*\n\n"
+            f"âï¸ *KazÄ±m baÅarÄ±lÄ±!*\n\n"
             f"+{daily:g} HNK\n"
-            f"💰 Bakiye: *{new_balance:.2f} HNK*",
+            f"ð° Bakiye: *{new_balance:.2f} HNK*",
             parse_mode="Markdown",
-            reply_markup=menu()
+            reply_markup=menu(),
         )
+        return
 
-    # =====================================================
-    # BALANCE
-    # =====================================================
-
-    elif s == "bal":
+    if s == "bal":
         await safe_edit(
             q,
-            f"💰 Bakiye: *{r['balance']:.2f} HNK*",
+            f"ð° Bakiye: *{r['balance']:.2f} HNK*",
             parse_mode="Markdown",
-            reply_markup=menu()
+            reply_markup=menu(),
         )
+        return
 
-    # =====================================================
-    # WALLET
-    # =====================================================
-
-    elif s == "wallet":
+    if s == "wallet":
         x.user_data["state"] = "wallet"
-
         await safe_edit(
             q,
-            "👛 BSC/EVM cüzdan adresini gönder.\n\n"
-            "Örnek:\n"
-            "`0x1234...`",
-            parse_mode="Markdown"
+            "ð BSC/EVM cÃ¼zdan adresini gÃ¶nder.\n\nÃrnek:\n`0x1234...`",
+            parse_mode="Markdown",
         )
+        return
 
-    # =====================================================
-    # WITHDRAW
-    # =====================================================
-
-    elif s == "with":
+    if s == "with":
         minimum = get_setting("min_withdraw", MIN_W)
-
         if not r["wallet"]:
             x.user_data["state"] = "wallet_then_with"
-
-            await safe_edit(
-                q,
-                "👛 Önce BSC cüzdan adresini gönder."
-            )
-
+            await safe_edit(q, "ð Ãnce BSC cÃ¼zdan adresini gÃ¶nder.")
         else:
             x.user_data["state"] = "with"
-
             await safe_edit(
                 q,
-                f"💸 Miktarı yaz.\n\n"
+                f"ð¸ MiktarÄ± yaz.\n\n"
                 f"Minimum: *{minimum:g} HNK*\n"
                 f"Bakiye: *{r['balance']:.2f} HNK*",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
             )
+        return
 
-    # =====================================================
-    # REFERRAL
-    # =====================================================
-
-    elif s == "ref":
+    if s == "ref":
         m = await x.bot.get_me()
-
         await safe_edit(
             q,
-            f"👥 Davet sayınız: *{r['referral_count']}*\n\n"
-            f"🔗 Davet linkiniz:\n"
-            f"`https://t.me/{m.username}?start=ref_{i}`",
+            f"ð¥ Davet sayÄ±nÄ±z: *{r['referral_count']}*\n\n"
+            f"ð Davet linkiniz:\n`https://t.me/{m.username}?start=ref_{i}`",
             parse_mode="Markdown",
-            reply_markup=menu()
+            reply_markup=menu(),
         )
+        return
 
-    # =====================================================
-    # USER STATS
-    # =====================================================
-
-    elif s == "stats":
+    if s == "stats":
         c = db()
-
-        n = c.execute(
-            "SELECT COUNT(*) FROM users"
-        ).fetchone()[0]
-
+        n = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         total_balance = c.execute(
             "SELECT COALESCE(SUM(balance),0) FROM users"
         ).fetchone()[0]
-
         total_ref = c.execute(
             "SELECT COALESCE(SUM(referral_count),0) FROM users"
         ).fetchone()[0]
-
         c.close()
 
         await safe_edit(
             q,
-            f"📊 *HNK İstatistik*\n\n"
-            f"👥 Kullanıcı: *{n}*\n"
-            f"💰 Kullanıcı bakiyeleri: *{total_balance:.2f} HNK*\n"
-            f"👥 Toplam referans: *{total_ref}*",
+            f"ð *HNK Ä°statistik*\n\n"
+            f"ð¥ KullanÄ±cÄ±: *{n}*\n"
+            f"ð° KullanÄ±cÄ± bakiyeleri: *{total_balance:.2f} HNK*\n"
+            f"ð¥ Toplam referans: *{total_ref}*",
             parse_mode="Markdown",
-            reply_markup=menu()
+            reply_markup=menu(),
         )
+        return
 
-    # =====================================================
-    # LEADERBOARD
-    # =====================================================
-
-    elif s == "lead":
+    if s == "lead":
         c = db()
-
         rows = c.execute(
             """
             SELECT first_name, balance
@@ -654,54 +473,36 @@ async def buttons(u, x):
             LIMIT 10
             """
         ).fetchall()
-
         c.close()
 
-        text_value = "\n".join(
-            f"{n}. {z['first_name'] or 'Kullanıcı'} — "
-            f"{z['balance']:.2f} HNK"
-            for n, z in enumerate(rows, 1)
-        )
-
-        if not text_value:
-            text_value = "Henüz kullanıcı yok."
+        lines = []
+        for n, z in enumerate(rows, 1):
+            name = z["first_name"] or "KullanÄ±cÄ±"
+            lines.append(f"{n}. {name} â {z['balance']:.2f} HNK")
+        text_value = "\n".join(lines) or "HenÃ¼z kullanÄ±cÄ± yok."
 
         await safe_edit(
             q,
-            f"👑 *HNK Liderlik*\n\n{text_value}",
+            f"ð *HNK Liderlik*\n\n{text_value}",
             parse_mode="Markdown",
-            reply_markup=menu()
+            reply_markup=menu(),
         )
+        return
 
-    # =====================================================
-    # ABOUT
-    # =====================================================
-
-    elif s == "about":
+    if s == "about":
         await safe_edit(
             q,
             ABOUT_TEXT.format(
-                minimum=get_setting(
-                    "min_withdraw",
-                    MIN_W
-                )
+                minimum=get_setting("min_withdraw", MIN_W)
             ),
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "⬅️ Ana Menü",
-                        callback_data="menu"
-                    )
-                ]
-            ])
+                [InlineKeyboardButton("â¬ï¸ Ana MenÃ¼", callback_data="menu")]
+            ]),
         )
+        return
 
-    # =====================================================
-    # BACK TO MENU
-    # =====================================================
-
-    elif s == "menu":
+    if s in ("menu", "back"):
         await safe_edit(
             q,
             START_TEXT.format(
@@ -710,425 +511,250 @@ async def buttons(u, x):
                 minimum=get_setting("min_withdraw", MIN_W),
             ),
             parse_mode="Markdown",
-            reply_markup=menu()
+            reply_markup=menu(),
         )
+        return
 
-    # =====================================================
+    if s == "stars":
+        await safe_edit(
+            q,
+            "â­ *HNK Stars*\n\n"
+            "ð HNK Stars sistemi aktif!\n\n"
+            "â­ Stars: 0\n"
+            "ð Stars ile Ã¶zel Ã¶dÃ¼ller ve avantajlar yakÄ±nda aktif olacak.\n\n"
+            "ð HNK Mining V2",
+            parse_mode="Markdown",
+            reply_markup=menu(),
+        )
+        return
+
     # ADMIN USERS
-    # =====================================================
-
-    elif s == "adm_users":
+    if s == "adm_users":
         c = db()
-
-        total = c.execute(
-            "SELECT COUNT(*) FROM users"
-        ).fetchone()[0]
-
+        total = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         active = c.execute(
             "SELECT COUNT(*) FROM users WHERE banned=0"
         ).fetchone()[0]
-
         banned = c.execute(
             "SELECT COUNT(*) FROM users WHERE banned=1"
         ).fetchone()[0]
-
         rows = c.execute(
             """
-            SELECT telegram_id, first_name, username,
-                   balance, referral_count
-            FROM users
-            ORDER BY created_at DESC
-            LIMIT 15
+            SELECT telegram_id, first_name, username, balance, referral_count
+            FROM users ORDER BY created_at DESC LIMIT 15
             """
         ).fetchall()
-
         c.close()
 
         lines = []
-
         for z in rows:
-            name = z["first_name"] or "Kullanıcı"
-
-            if z["username"]:
-                name += f" @{z['username']}"
-
+            name = z["first_name"] or "KullanÄ±cÄ±"
+            username = f" @{z['username']}" if z["username"] else ""
             lines.append(
-                f"👤 {name}\n"
-                f"🆔 {z['telegram_id']}\n"
-                f"💰 {z['balance']:.2f} HNK\n"
-                f"👥 Ref: {z['referral_count']}"
+                f"ð¤ {name}{username}\n"
+                f"ð {z['telegram_id']}\n"
+                f"ð° {z['balance']:.2f} HNK\n"
+                f"ð¥ Ref: {z['referral_count']}"
             )
-
-        users_text = "\n\n".join(lines)
-
-        if not users_text:
-            users_text = "Kullanıcı bulunamadı."
+        users_text = "\n\n".join(lines) or "KullanÄ±cÄ± bulunamadÄ±."
 
         await safe_edit(
             q,
-            f"👥 *KULLANICILAR*\n\n"
-            f"Toplam: *{total}*\n"
-            f"Aktif: *{active}*\n"
-            f"Engelli: *{banned}*\n\n"
+            f"ð¥ KULLANICILAR\n\n"
+            f"Toplam: {total}\n"
+            f"Aktif: {active}\n"
+            f"Engelli: {banned}\n\n"
             f"{users_text}",
-            parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "🔄 Yenile",
-                        callback_data="adm_users"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "⬅️ Admin",
-                        callback_data="admin"
-                    )
-                ]
-            ])
+                [InlineKeyboardButton("ð Yenile", callback_data="adm_users")],
+                [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")],
+            ]),
         )
+        return
 
-    # =====================================================
-    # ADMIN STATS
-    # =====================================================
-
-    elif s == "adm_stats":
+    if s == "adm_stats":
         c = db()
-
-        users = c.execute(
-            "SELECT COUNT(*) FROM users"
-        ).fetchone()[0]
-
+        users = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         balance = c.execute(
             "SELECT COALESCE(SUM(balance),0) FROM users"
         ).fetchone()[0]
-
         withdrawals = c.execute(
             "SELECT COUNT(*) FROM withdrawals"
         ).fetchone()[0]
-
         pending = c.execute(
-            """
-            SELECT COUNT(*)
-            FROM withdrawals
-            WHERE status='pending'
-            """
+            "SELECT COUNT(*) FROM withdrawals WHERE status='pending'"
         ).fetchone()[0]
-
         pending_amount = c.execute(
-            """
-            SELECT COALESCE(SUM(amount),0)
-            FROM withdrawals
-            WHERE status='pending'
-            """
+            "SELECT COALESCE(SUM(amount),0) FROM withdrawals WHERE status='pending'"
         ).fetchone()[0]
-
         paid = c.execute(
-            """
-            SELECT COALESCE(SUM(amount),0)
-            FROM withdrawals
-            WHERE status='approved'
-            """
+            "SELECT COALESCE(SUM(amount),0) FROM withdrawals WHERE status='approved'"
         ).fetchone()[0]
-
         c.close()
 
         await safe_edit(
             q,
-            f"📊 *HNK ADMIN İSTATİSTİK*\n\n"
-            f"👥 Kullanıcı: *{users}*\n"
-            f"💰 Toplam bakiye: *{balance:.2f} HNK*\n\n"
-            f"💸 Toplam çekim: *{withdrawals}*\n"
-            f"⏳ Bekleyen: *{pending}*\n"
-            f"⏳ Bekleyen miktar: *{pending_amount:.2f} HNK*\n"
-            f"✅ Onaylanan çekim: *{paid:.2f} HNK*",
+            f"ð *HNK ADMIN Ä°STATÄ°STÄ°K*\n\n"
+            f"ð¥ KullanÄ±cÄ±: *{users}*\n"
+            f"ð° Toplam bakiye: *{balance:.2f} HNK*\n\n"
+            f"ð¸ Toplam Ã§ekim: *{withdrawals}*\n"
+            f"â³ Bekleyen: *{pending}*\n"
+            f"â³ Bekleyen miktar: *{pending_amount:.2f} HNK*\n"
+            f"â Onaylanan Ã§ekim: *{paid:.2f} HNK*",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "⬅️ Admin",
-                        callback_data="admin"
-                    )
-                ]
-            ])
+                [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")]
+            ]),
         )
+        return
 
-    # =====================================================
-    # ADMIN MINING SETTINGS
-    # =====================================================
-
-    elif s == "adm_mining":
+    if s == "adm_mining":
         daily = get_setting("daily", DAILY)
-
         await safe_edit(
             q,
-            f"💰 *KAZIM AYARLARI*\n\n"
-            f"⛏️ Günlük kazım: *{daily:g} HNK*\n\n"
-            f"Yeni günlük miktarı yazmak için aşağıdaki butona bas.",
+            f"ð° *KAZIM AYARLARI*\n\n"
+            f"âï¸ GÃ¼nlÃ¼k kazÄ±m: *{daily:g} HNK*",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "✏️ Günlük Kazımı Değiştir",
-                        callback_data="adm_set_daily"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "⬅️ Admin",
-                        callback_data="admin"
-                    )
-                ]
-            ])
+                [InlineKeyboardButton("âï¸ GÃ¼nlÃ¼k KazÄ±mÄ± DeÄiÅtir", callback_data="adm_set_daily")],
+                [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")],
+            ]),
         )
+        return
 
-    elif s == "adm_set_daily":
+    if s == "adm_set_daily":
         x.user_data["state"] = "admin_daily"
+        await safe_edit(q, "âï¸ Yeni gÃ¼nlÃ¼k HNK miktarÄ±nÄ± yaz.\n\nÃrnek: `0.25`", parse_mode="Markdown")
+        return
 
-        await safe_edit(
-            q,
-            "⛏️ Yeni günlük HNK miktarını yaz.\n\n"
-            "Örnek: `0.25`",
-            parse_mode="Markdown"
-        )
-
-    # =====================================================
-    # ADMIN BONUS SETTINGS
-    # =====================================================
-
-    elif s == "adm_bonus":
+    if s == "adm_bonus":
         bonus = get_setting("bonus", BONUS)
         ref_bonus = get_setting("ref_bonus", REF_BONUS)
         minimum = get_setting("min_withdraw", MIN_W)
-
         await safe_edit(
             q,
-            f"🎁 *BONUS AYARLARI*\n\n"
-            f"🎁 Başlangıç bonusu: *{bonus:g} HNK*\n"
-            f"👥 Referans bonusu: *{ref_bonus:g} HNK*\n"
-            f"💸 Minimum çekim: *{minimum:g} HNK*",
+            f"ð *BONUS AYARLARI*\n\n"
+            f"ð BaÅlangÄ±Ã§ bonusu: *{bonus:g} HNK*\n"
+            f"ð¥ Referans bonusu: *{ref_bonus:g} HNK*\n"
+            f"ð¸ Minimum Ã§ekim: *{minimum:g} HNK*",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "🎁 Başlangıç Bonusunu Değiştir",
-                        callback_data="adm_set_bonus"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "👥 Referans Bonusunu Değiştir",
-                        callback_data="adm_set_refbonus"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "💸 Minimum Çekimi Değiştir",
-                        callback_data="adm_set_min"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "⬅️ Admin",
-                        callback_data="admin"
-                    )
-                ]
-            ])
-        )
-
-    elif s == "adm_set_bonus":
-        x.user_data["state"] = "admin_bonus"
-
-        await safe_edit(
-            q,
-            "🎁 Yeni başlangıç bonusunu yaz.\n\n"
-            "Örnek: `1`",
-            parse_mode="Markdown"
-        )
-
-    elif s == "adm_set_refbonus":
-        x.user_data["state"] = "admin_refbonus"
-
-        await safe_edit(
-            q,
-            "👥 Yeni referans bonusunu yaz.\n\n"
-            "Örnek: `1`",
-            parse_mode="Markdown"
-        )
-
-    elif s == "adm_set_min":
-        x.user_data["state"] = "admin_min"
-
-        await safe_edit(
-            q,
-            "💸 Yeni minimum çekim miktarını yaz.\n\n"
-            "Örnek: `10`",
-            parse_mode="Markdown"
-        )
-
-    # =====================================================
-    # BROADCAST
-    # =====================================================
-
-    elif s == "adm_broadcast":
-        x.user_data["state"] = "admin_broadcast"
-
-        await safe_edit(
-            q,
-            "📢 *DUYURU MODU*\n\n"
-            "Gönderilecek mesajı yaz.\n\n"
-            "Mesaj aktif kullanıcılara gönderilecektir.",
-            parse_mode="Markdown"
-        )
-
-    # =====================================================
-    # USER MANAGEMENT
-    # =====================================================
-
-    elif s == "adm_manage":
-        if not is_admin(i):
-            await q.answer(
-                "⛔ Yetkiniz yok.",
-                show_alert=True
-            )
-            return
-
-        x.user_data["state"] = "admin_manage"
-
-        await safe_edit(
-            q,
-            "🚫 *KULLANICI YÖNETİMİ*\n\n"
-            "Yönetmek istediğin kullanıcının Telegram ID'sini gönder.\n\n"
-            "Örnek:\n"
-            "`8769533867`\n\n"
-            "ID'yi mesaj olarak gönder.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "⬅️ Admin",
-                        callback_data="admin"
-                    )
-                ]
-            ])
+                [InlineKeyboardButton("ð BaÅlangÄ±Ã§ Bonusunu DeÄiÅtir", callback_data="adm_set_bonus")],
+                [InlineKeyboardButton("ð¥ Referans Bonusunu DeÄiÅtir", callback_data="adm_set_refbonus")],
+                [InlineKeyboardButton("ð¸ Minimum Ãekimi DeÄiÅtir", callback_data="adm_set_min")],
+                [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")],
+            ]),
         )
         return
-    # =====================================================
-    # WITHDRAWAL LIST
-    # =====================================================
 
-    elif s == "adm_withdrawals":
+    if s == "adm_set_bonus":
+        x.user_data["state"] = "admin_bonus"
+        await safe_edit(q, "ð Yeni baÅlangÄ±Ã§ bonusunu yaz.\n\nÃrnek: `1`", parse_mode="Markdown")
+        return
+
+    if s == "adm_set_refbonus":
+        x.user_data["state"] = "admin_refbonus"
+        await safe_edit(q, "ð¥ Yeni referans bonusunu yaz.\n\nÃrnek: `1`", parse_mode="Markdown")
+        return
+
+    if s == "adm_set_min":
+        x.user_data["state"] = "admin_min"
+        await safe_edit(q, "ð¸ Yeni minimum Ã§ekim miktarÄ±nÄ± yaz.\n\nÃrnek: `10`", parse_mode="Markdown")
+        return
+
+    if s == "adm_broadcast":
+        x.user_data["state"] = "admin_broadcast"
+        await safe_edit(
+            q,
+            "ð¢ *DUYURU MODU*\n\nGÃ¶nderilecek mesajÄ± yaz.\n\nMesaj aktif kullanÄ±cÄ±lara gÃ¶nderilecektir.",
+            parse_mode="Markdown",
+        )
+        return
+
+    if s == "adm_manage":
+        x.user_data["state"] = "admin_manage"
+        await safe_edit(
+            q,
+            "ð« *KULLANICI YÃNETÄ°MÄ°*\n\n"
+            "YÃ¶netmek istediÄin kullanÄ±cÄ±nÄ±n Telegram ID'sini gÃ¶nder.\n\n"
+            "Ãrnek:\n`8769533867`",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")]
+            ]),
+        )
+        return
+
+    # WITHDRAWALS
+    if s == "adm_withdrawals":
         c = db()
-
         rows = c.execute(
             """
             SELECT id, telegram_id, amount, wallet, created_at
             FROM withdrawals
             WHERE status='pending'
-            ORDER BY id ASC
-            LIMIT 10
+            ORDER BY id ASC LIMIT 10
             """
         ).fetchall()
-
         c.close()
 
         if not rows:
             await safe_edit(
                 q,
-                "💸 *ÇEKİM TALEPLERİ*\n\n"
-                "⏳ Bekleyen çekim bulunmuyor.",
+                "ð¸ *ÃEKÄ°M TALEPLERÄ°*\n\nâ³ Bekleyen Ã§ekim bulunmuyor.",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton(
-                            "⬅️ Admin",
-                            callback_data="admin"
-                        )
-                    ]
-                ])
+                    [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")]
+                ]),
             )
             return
 
-        buttons_list = []
-
-        text_value = "💸 *BEKLEYEN ÇEKİMLER*\n\n"
-
+        text_value = "ð¸ *BEKLEYEN ÃEKÄ°MLER*\n\n"
+        button_rows = []
         for z in rows:
             text_value += (
-                f"🆔 Talep: *#{z['id']}*\n"
-                f"👤 Kullanıcı: `{z['telegram_id']}`\n"
-                f"💰 Miktar: *{z['amount']:.2f} HNK*\n"
-                f"👛 Cüzdan: `{z['wallet']}`\n\n"
+                f"ð Talep: *#{z['id']}*\n"
+                f"ð¤ KullanÄ±cÄ±: `{z['telegram_id']}`\n"
+                f"ð° Miktar: *{z['amount']:.2f} HNK*\n"
+                f"ð CÃ¼zdan: `{z['wallet']}`\n\n"
             )
-
-            buttons_list.append([
-                InlineKeyboardButton(
-                    f"#{z['id']} ✅",
-                    callback_data=f"wd_approve_{z['id']}"
-                ),
-                InlineKeyboardButton(
-                    f"#{z['id']} ❌",
-                    callback_data=f"wd_reject_{z['id']}"
-                )
+            button_rows.append([
+                InlineKeyboardButton(f"#{z['id']} â", callback_data=f"wd_approve_{z['id']}"),
+                InlineKeyboardButton(f"#{z['id']} â", callback_data=f"wd_reject_{z['id']}"),
             ])
-
-        buttons_list.append([
-            InlineKeyboardButton(
-                "🔄 Yenile",
-                callback_data="adm_withdrawals"
-            )
-        ])
-
-        buttons_list.append([
-            InlineKeyboardButton(
-                "⬅️ Admin",
-                callback_data="admin"
-            )
-        ])
-
+        button_rows += [
+            [InlineKeyboardButton("ð Yenile", callback_data="adm_withdrawals")],
+            [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")],
+        ]
         await safe_edit(
             q,
             text_value,
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(buttons_list)
+            reply_markup=InlineKeyboardMarkup(button_rows),
         )
+        return
 
-    # =====================================================
-    # APPROVE WITHDRAWAL
-    # =====================================================
-
-    elif s.startswith("wd_approve_"):
-        wid = int(s.split("_")[-1])
+    if s.startswith("wd_approve_"):
+        try:
+            wid = int(s.rsplit("_", 1)[1])
+        except ValueError:
+            await q.answer("GeÃ§ersiz talep.", show_alert=True)
+            return
 
         c = db()
-
         w = c.execute(
-            """
-            SELECT *
-            FROM withdrawals
-            WHERE id=? AND status='pending'
-            """,
-            (wid,)
+            "SELECT * FROM withdrawals WHERE id=? AND status='pending'",
+            (wid,),
         ).fetchone()
-
         if not w:
             c.close()
-
-            await q.answer(
-                "Talep bulunamadı veya zaten işlendi.",
-                show_alert=True
-            )
+            await q.answer("Talep bulunamadÄ± veya zaten iÅlendi.", show_alert=True)
             return
 
         c.execute(
-            """
-            UPDATE withdrawals
-            SET status='approved'
-            WHERE id=?
-            """,
-            (wid,)
+            "UPDATE withdrawals SET status='approved' WHERE id=? AND status='pending'",
+            (wid,),
         )
-
         c.commit()
         c.close()
 
@@ -1136,82 +762,52 @@ async def buttons(u, x):
             await x.bot.send_message(
                 chat_id=w["telegram_id"],
                 text=(
-                    f"✅ *Çekim talebiniz onaylandı!*\n\n"
-                    f"💰 Miktar: *{w['amount']:.2f} HNK*\n"
-                    f"👛 Cüzdan: `{w['wallet']}`\n\n"
-                    f"Transfer işlemi yönetici tarafından "
-                    f"gerçekleştirilecektir."
+                    "â *Ãekim talebiniz onaylandÄ±!*\n\n"
+                    f"ð° Miktar: *{w['amount']:.2f} HNK*\n"
+                    f"ð CÃ¼zdan: `{w['wallet']}`\n\n"
+                    "Transfer iÅlemi yÃ¶netici tarafÄ±ndan gerÃ§ekleÅtirilecektir."
                 ),
-                parse_mode="Markdown"
+                parse_mode="Markdown",
             )
         except Exception:
             pass
 
         await safe_edit(
             q,
-            f"✅ *#{wid} numaralı çekim onaylandı.*",
+            f"â *#{wid} numaralÄ± Ã§ekim onaylandÄ±.*",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "💸 Çekimlere Dön",
-                        callback_data="adm_withdrawals"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "⬅️ Admin",
-                        callback_data="admin"
-                    )
-                ]
-            ])
+                [InlineKeyboardButton("ð¸ Ãekimlere DÃ¶n", callback_data="adm_withdrawals")],
+                [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")],
+            ]),
         )
+        return
 
-    # =====================================================
-    # REJECT WITHDRAWAL
-    # =====================================================
-
-    elif s.startswith("wd_reject_"):
-        wid = int(s.split("_")[-1])
+    if s.startswith("wd_reject_"):
+        try:
+            wid = int(s.rsplit("_", 1)[1])
+        except ValueError:
+            await q.answer("GeÃ§ersiz talep.", show_alert=True)
+            return
 
         c = db()
-
         w = c.execute(
-            """
-            SELECT *
-            FROM withdrawals
-            WHERE id=? AND status='pending'
-            """,
-            (wid,)
+            "SELECT * FROM withdrawals WHERE id=? AND status='pending'",
+            (wid,),
         ).fetchone()
-
         if not w:
             c.close()
-
-            await q.answer(
-                "Talep bulunamadı veya zaten işlendi.",
-                show_alert=True
-            )
+            await q.answer("Talep bulunamadÄ± veya zaten iÅlendi.", show_alert=True)
             return
 
         c.execute(
-            """
-            UPDATE users
-            SET balance=balance+?
-            WHERE telegram_id=?
-            """,
-            (w["amount"], w["telegram_id"])
+            "UPDATE users SET balance=balance+? WHERE telegram_id=?",
+            (w["amount"], w["telegram_id"]),
         )
-
         c.execute(
-            """
-            UPDATE withdrawals
-            SET status='rejected'
-            WHERE id=?
-            """,
-            (wid,)
+            "UPDATE withdrawals SET status='rejected' WHERE id=? AND status='pending'",
+            (wid,),
         )
-
         c.commit()
         c.close()
 
@@ -1219,692 +815,424 @@ async def buttons(u, x):
             await x.bot.send_message(
                 chat_id=w["telegram_id"],
                 text=(
-                    f"❌ *Çekim talebiniz reddedildi.*\n\n"
-                    f"💰 Miktar: *{w['amount']:.2f} HNK*\n"
-                    f"💰 Tutar hesabınıza iade edildi."
+                    "â *Ãekim talebiniz reddedildi.*\n\n"
+                    f"ð° Miktar: *{w['amount']:.2f} HNK*\n"
+                    "ð° Tutar hesabÄ±nÄ±za iade edildi."
                 ),
-                parse_mode="Markdown"
+                parse_mode="Markdown",
             )
         except Exception:
             pass
 
         await safe_edit(
             q,
-            f"❌ *#{wid} numaralı çekim reddedildi.*\n\n"
-            f"💰 {w['amount']:.2f} HNK kullanıcıya iade edildi.",
+            f"â *#{wid} numaralÄ± Ã§ekim reddedildi.*\n\n"
+            f"ð° {w['amount']:.2f} HNK kullanÄ±cÄ±ya iade edildi.",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "💸 Çekimlere Dön",
-                        callback_data="adm_withdrawals"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "⬅️ Admin",
-                        callback_data="admin"
-                    )
-                ]
-            ])
+                [InlineKeyboardButton("ð¸ Ãekimlere DÃ¶n", callback_data="adm_withdrawals")],
+                [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")],
+            ]),
         )
+        return
 
-    # =====================================================
-    # ADMIN STARS
-    # =====================================================
-
-    elif s == "adm_stars":
+    if s == "adm_stars":
         await safe_edit(
             q,
-            "⭐ *HNK STARS ADMIN*\n\n"
-            "🌟 Stars sistemi hazırlanıyor.\n\n"
-            "Bu bölüm ileride Stars bakiyeleri, "
-            "ödüller ve kampanyaları yönetmek için kullanılabilir.",
+            "â­ *HNK STARS ADMIN*\n\n"
+            "ð Stars sistemi hazÄ±rlanÄ±yor.\n\n"
+            "Bu bÃ¶lÃ¼m ileride Stars bakiyeleri, Ã¶dÃ¼ller ve kampanyalarÄ± yÃ¶netmek iÃ§in kullanÄ±labilir.",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "⬅️ Admin",
-                        callback_data="admin"
-                    )
-                ]
-            ])
+                [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")]
+            ]),
         )
+        return
 
-    # =====================================================
-    # BACK
-    # =====================================================
+    # USER MANAGEMENT ACTIONS
+    if s in ("usr_balance", "usr_ban"):
+        uid = x.user_data.get("manage_user")
+        if not uid:
+            await q.answer("Ãnce kullanÄ±cÄ± seÃ§in.", show_alert=True)
+            return
 
-    elif s == "back":
-        await safe_edit(
-            q,
-            START_TEXT.format(
-                bonus=get_setting("bonus", BONUS),
-                daily=get_setting("daily", DAILY),
-                minimum=get_setting("min_withdraw", MIN_W),
-            ),
-            parse_mode="Markdown",
-            reply_markup=menu()
+        if uid == ADMIN_ID and s == "usr_ban":
+            await q.answer("Ana yÃ¶netici engellenemez.", show_alert=True)
+            return
+
+        if s == "usr_balance":
+            x.user_data["state"] = "admin_balance"
+            await q.message.reply_text(
+                "ð° Bakiye deÄiÅikliÄini yaz.\n\n"
+                "Pozitif deÄer ekler: `10`\n"
+                "Negatif deÄer dÃ¼Åer: `-10`",
+                parse_mode="Markdown",
+            )
+            return
+
+        c = db()
+        row = c.execute(
+            "SELECT banned FROM users WHERE telegram_id=?",
+            (uid,),
+        ).fetchone()
+        if not row:
+            c.close()
+            await q.answer("KullanÄ±cÄ± bulunamadÄ±.", show_alert=True)
+            return
+
+        new_status = 0 if row["banned"] else 1
+        c.execute(
+            "UPDATE users SET banned=? WHERE telegram_id=?",
+            (new_status, uid),
         )
+        c.commit()
+        c.close()
 
+        x.user_data["state"] = None
+        await q.message.reply_text(
+            ("ð« KullanÄ±cÄ± engellendi." if new_status else "â KullanÄ±cÄ±nÄ±n engeli kaldÄ±rÄ±ldÄ±.")
+            + f"\n\nð {uid}",
+            reply_markup=admin_menu(),
+        )
+        return
 
-# =========================================================
-# TEXT HANDLER
-# =========================================================
 
 async def text(u, x):
-    st = x.user_data.get("state")
     i = u.effective_user.id
-
+    st = x.user_data.get("state")
     if not st:
+        return
+
+    r = user(i)
+    if not r:
+        add(u.effective_user)
+        r = user(i)
+
+    if r and r["banned"] and not is_admin(i):
+        x.user_data["state"] = None
+        await u.message.reply_text("ð« HesabÄ±nÄ±z yÃ¶netici tarafÄ±ndan engellenmiÅtir.")
         return
 
     t = u.message.text.strip()
 
-    # =====================================================
-    # ADMIN DAILY
-    # =====================================================
+    if st.startswith("admin_") and not is_admin(i):
+        x.user_data["state"] = None
+        return
 
     if st == "admin_daily":
-        if not is_admin(i):
-            x.user_data["state"] = None
-            return
-
         try:
             value = float(t.replace(",", "."))
-        except Exception:
-            await u.message.reply_text(
-                "❌ Geçerli bir sayı gir."
-            )
+        except ValueError:
+            await u.message.reply_text("â GeÃ§erli bir sayÄ± gir.")
             return
-
         if value <= 0:
-            await u.message.reply_text(
-                "❌ Değer 0'dan büyük olmalı."
-            )
+            await u.message.reply_text("â DeÄer 0'dan bÃ¼yÃ¼k olmalÄ±.")
             return
-
         set_setting("daily", value)
-
         x.user_data["state"] = None
-
         await u.message.reply_text(
-            f"✅ Günlük kazım güncellendi.\n\n"
-            f"⛏️ Yeni değer: {value:g} HNK",
-            reply_markup=admin_menu()
+            f"â GÃ¼nlÃ¼k kazÄ±m gÃ¼ncellendi.\n\nâï¸ Yeni deÄer: {value:g} HNK",
+            reply_markup=admin_menu(),
         )
         return
-
-    # =====================================================
-    # ADMIN BONUS
-    # =====================================================
 
     if st == "admin_bonus":
-        if not is_admin(i):
-            x.user_data["state"] = None
-            return
-
         try:
             value = float(t.replace(",", "."))
-        except Exception:
-            await u.message.reply_text(
-                "❌ Geçerli bir sayı gir."
-            )
+        except ValueError:
+            await u.message.reply_text("â GeÃ§erli bir sayÄ± gir.")
             return
-
         if value < 0:
-            await u.message.reply_text(
-                "❌ Bonus negatif olamaz."
-            )
+            await u.message.reply_text("â Bonus negatif olamaz.")
             return
-
         set_setting("bonus", value)
-
         x.user_data["state"] = None
-
         await u.message.reply_text(
-            f"✅ Başlangıç bonusu güncellendi.\n\n"
-            f"🎁 Yeni bonus: {value:g} HNK",
-            reply_markup=admin_menu()
+            f"â BaÅlangÄ±Ã§ bonusu gÃ¼ncellendi.\n\nð Yeni bonus: {value:g} HNK",
+            reply_markup=admin_menu(),
         )
         return
-
-    # =====================================================
-    # ADMIN REF BONUS
-    # =====================================================
 
     if st == "admin_refbonus":
-        if not is_admin(i):
-            x.user_data["state"] = None
-            return
-
         try:
             value = float(t.replace(",", "."))
-        except Exception:
-            await u.message.reply_text(
-                "❌ Geçerli bir sayı gir."
-            )
+        except ValueError:
+            await u.message.reply_text("â GeÃ§erli bir sayÄ± gir.")
             return
-
         if value < 0:
-            await u.message.reply_text(
-                "❌ Bonus negatif olamaz."
-            )
+            await u.message.reply_text("â Bonus negatif olamaz.")
             return
-
         set_setting("ref_bonus", value)
-
         x.user_data["state"] = None
-
         await u.message.reply_text(
-            f"✅ Referans bonusu güncellendi.\n\n"
-            f"👥 Yeni bonus: {value:g} HNK",
-            reply_markup=admin_menu()
+            f"â Referans bonusu gÃ¼ncellendi.\n\nð¥ Yeni bonus: {value:g} HNK",
+            reply_markup=admin_menu(),
         )
         return
-
-    # =====================================================
-    # ADMIN MINIMUM WITHDRAW
-    # =====================================================
 
     if st == "admin_min":
-        if not is_admin(i):
-            x.user_data["state"] = None
-            return
-
         try:
             value = float(t.replace(",", "."))
-        except Exception:
-            await u.message.reply_text(
-                "❌ Geçerli bir sayı gir."
-            )
+        except ValueError:
+            await u.message.reply_text("â GeÃ§erli bir sayÄ± gir.")
             return
-
         if value <= 0:
-            await u.message.reply_text(
-                "❌ Minimum çekim 0'dan büyük olmalı."
-            )
+            await u.message.reply_text("â Minimum Ã§ekim 0'dan bÃ¼yÃ¼k olmalÄ±.")
             return
-
         set_setting("min_withdraw", value)
-
         x.user_data["state"] = None
-
         await u.message.reply_text(
-            f"✅ Minimum çekim güncellendi.\n\n"
-            f"💸 Yeni minimum: {value:g} HNK",
-            reply_markup=admin_menu()
+            f"â Minimum Ã§ekim gÃ¼ncellendi.\n\nð¸ Yeni minimum: {value:g} HNK",
+            reply_markup=admin_menu(),
         )
         return
 
-    # =====================================================
-    # ADMIN BROADCAST
-    # =====================================================
-
     if st == "admin_broadcast":
-        if not is_admin(i):
-            x.user_data["state"] = None
-            return
-
         c = db()
-
-        rows = c.execute(
-            """
-            SELECT telegram_id
-            FROM users
-            WHERE banned=0
-            """
-        ).fetchall()
-
+        rows = c.execute("SELECT telegram_id FROM users WHERE banned=0").fetchall()
         c.close()
 
         sent = 0
         failed = 0
-
         for z in rows:
             try:
-                await x.bot.send_message(
-                    chat_id=z["telegram_id"],
-                    text=t
-                )
+                await x.bot.send_message(chat_id=z["telegram_id"], text=t)
                 sent += 1
             except Exception:
                 failed += 1
 
         x.user_data["state"] = None
-
         await u.message.reply_text(
-            f"📢 *DUYURU TAMAMLANDI*\n\n"
-            f"✅ Gönderildi: *{sent}*\n"
-            f"❌ Başarısız: *{failed}*",
+            f"ð¢ *DUYURU TAMAMLANDI*\n\n"
+            f"â GÃ¶nderildi: *{sent}*\n"
+            f"â BaÅarÄ±sÄ±z: *{failed}*",
             parse_mode="Markdown",
-            reply_markup=admin_menu()
+            reply_markup=admin_menu(),
         )
         return
 
-    # =====================================================
-    # ADMIN USER MANAGEMENT
-    # =====================================================
-
     if st == "admin_manage":
-        if not is_admin(i):
-            x.user_data["state"] = None
-            return
-
         try:
             uid = int(t)
-        except Exception:
-            await u.message.reply_text(
-                "❌ Geçerli Telegram ID gir."
-            )
+        except ValueError:
+            await u.message.reply_text("â GeÃ§erli Telegram ID gir.")
             return
 
         r = user(uid)
-
         if not r:
             x.user_data["state"] = None
-
-            await u.message.reply_text(
-                "❌ Kullanıcı bulunamadı.",
-                reply_markup=admin_menu()
-            )
+            await u.message.reply_text("â KullanÄ±cÄ± bulunamadÄ±.", reply_markup=admin_menu())
             return
-
-        status = "🚫 Engelli" if r["banned"] else "✅ Aktif"
 
         x.user_data["manage_user"] = uid
         x.user_data["state"] = "admin_user_action"
+        status = "ð« Engelli" if r["banned"] else "â Aktif"
 
         await u.message.reply_text(
-            f"👤 *KULLANICI*\n\n"
-            f"🆔 `{uid}`\n"
-            f"👤 {r['first_name'] or 'Kullanıcı'}\n"
-            f"💰 Bakiye: *{r['balance']:.2f} HNK*\n"
-            f"👥 Referans: *{r['referral_count']}*\n"
-            f"📌 Durum: {status}",
-            parse_mode="Markdown",
+            f"ð¤ KULLANICI\n\n"
+            f"ð {uid}\n"
+            f"ð¤ {r['first_name'] or 'KullanÄ±cÄ±'}\n"
+            f"ð° Bakiye: {r['balance']:.2f} HNK\n"
+            f"ð¥ Referans: {r['referral_count']}\n"
+            f"ð Durum: {status}",
             reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "💰 Bakiye Değiştir",
-                        callback_data="usr_balance"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "🚫 Engelle / Aç",
-                        callback_data="usr_ban"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "⬅️ Admin",
-                        callback_data="admin"
-                    )
-                ]
-            ])
+                [InlineKeyboardButton("ð° Bakiye DeÄiÅtir", callback_data="usr_balance")],
+                [InlineKeyboardButton("ð« Engelle / AÃ§", callback_data="usr_ban")],
+                [InlineKeyboardButton("â¬ï¸ Admin", callback_data="admin")],
+            ]),
         )
         return
 
-    # =====================================================
-    # ADMIN BALANCE ACTION
-    # =====================================================
-
     if st == "admin_balance":
-        if not is_admin(i):
-            x.user_data["state"] = None
-            return
-
         uid = x.user_data.get("manage_user")
-
         if not uid:
             x.user_data["state"] = None
             return
 
+        if uid == ADMIN_ID:
+            x.user_data["state"] = None
+            await u.message.reply_text("â Ana yÃ¶netici bakiyesi bu menÃ¼den deÄiÅtirilemez.", reply_markup=admin_menu())
+            return
+
         try:
             amount = float(t.replace(",", "."))
-        except Exception:
-            await u.message.reply_text(
-                "❌ Örnek: `5` veya `-5`",
-                parse_mode="Markdown"
-            )
+        except ValueError:
+            await u.message.reply_text("â Ãrnek: `5` veya `-5`", parse_mode="Markdown")
             return
 
         c = db()
+        row = c.execute(
+            "SELECT balance FROM users WHERE telegram_id=?",
+            (uid,),
+        ).fetchone()
+        if not row:
+            c.close()
+            x.user_data["state"] = None
+            await u.message.reply_text("â KullanÄ±cÄ± bulunamadÄ±.", reply_markup=admin_menu())
+            return
+
+        new_balance = row["balance"] + amount
+        if new_balance < 0:
+            c.close()
+            await u.message.reply_text("â Bakiye 0'Ä±n altÄ±na inemez.")
+            return
 
         c.execute(
-            """
-            UPDATE users
-            SET balance=balance+?
-            WHERE telegram_id=?
-            """,
-            (amount, uid)
+            "UPDATE users SET balance=? WHERE telegram_id=?",
+            (new_balance, uid),
         )
-
         c.commit()
         c.close()
 
         x.user_data["state"] = None
-
-        new_balance = user(uid)["balance"]
-
         await u.message.reply_text(
-            f"✅ Bakiye güncellendi.\n\n"
-            f"🆔 {uid}\n"
-            f"💰 Yeni bakiye: *{new_balance:.2f} HNK*",
+            f"â Bakiye gÃ¼ncellendi.\n\n"
+            f"ð {uid}\n"
+            f"ð° Yeni bakiye: *{new_balance:.2f} HNK*",
             parse_mode="Markdown",
-            reply_markup=admin_menu()
+            reply_markup=admin_menu(),
         )
         return
 
-    # =====================================================
-    # NORMAL WALLET
-    # =====================================================
-
-    if st.startswith("wallet"):
-        if not re.fullmatch(
-            r"0x[a-fA-F0-9]{40}",
-            t
-        ):
-            await u.message.reply_text(
-                "❌ Geçerli BSC/EVM adresi gir."
-            )
+    if st in ("wallet", "wallet_then_with"):
+        if not re.fullmatch(r"0x[a-fA-F0-9]{40}", t):
+            await u.message.reply_text("â GeÃ§erli BSC/EVM adresi gir.")
             return
 
         c = db()
-
         c.execute(
-            """
-            UPDATE users
-            SET wallet=?
-            WHERE telegram_id=?
-            """,
-            (t, i)
+            "UPDATE users SET wallet=? WHERE telegram_id=?",
+            (t, i),
         )
-
         c.commit()
         c.close()
 
-        x.user_data["state"] = (
-            "with"
-            if st == "wallet_then_with"
-            else None
-        )
+        next_state = "with" if st == "wallet_then_with" else None
+        x.user_data["state"] = next_state
 
         await u.message.reply_text(
-            "✅ Cüzdan kaydedildi." +
-            (
-                "\nŞimdi çekim miktarını yaz."
-                if st == "wallet_then_with"
-                else ""
-            ),
-            reply_markup=menu()
+            "â CÃ¼zdan kaydedildi."
+            + ("\nÅimdi Ã§ekim miktarÄ±nÄ± yaz." if next_state == "with" else ""),
+            reply_markup=menu() if not next_state else None,
         )
         return
-
-    # =====================================================
-    # NORMAL WITHDRAW
-    # =====================================================
 
     if st == "with":
         try:
             amount = float(t.replace(",", "."))
-        except Exception:
-            await u.message.reply_text(
-                "❌ Miktarı sayı olarak yaz."
-            )
+        except ValueError:
+            await u.message.reply_text("â MiktarÄ± sayÄ± olarak yaz.")
             return
 
-        r = user(i)
+        if amount <= 0:
+            await u.message.reply_text("â Miktar 0'dan bÃ¼yÃ¼k olmalÄ±.")
+            return
 
-        minimum = get_setting(
-            "min_withdraw",
-            MIN_W
-        )
-
+        minimum = get_setting("min_withdraw", MIN_W)
         if amount < minimum:
-            await u.message.reply_text(
-                f"❌ Minimum çekim: {minimum:g} HNK"
-            )
-            return
-
-        if amount > r["balance"]:
-            await u.message.reply_text(
-                "❌ Bakiye yetersiz."
-            )
+            await u.message.reply_text(f"â Minimum Ã§ekim: {minimum:g} HNK")
             return
 
         c = db()
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT balance,wallet FROM users WHERE telegram_id=?",
+            (i,),
+        ).fetchone()
+
+        if not row or not row["wallet"]:
+            c.rollback()
+            c.close()
+            x.user_data["state"] = None
+            await u.message.reply_text("â CÃ¼zdan bulunamadÄ±.", reply_markup=menu())
+            return
+
+        if amount > row["balance"]:
+            c.rollback()
+            c.close()
+            await u.message.reply_text("â Bakiye yetersiz.")
+            return
 
         c.execute(
             """
-            UPDATE users
-            SET balance=balance-?
-            WHERE telegram_id=?
+            UPDATE users SET balance=balance-?
+            WHERE telegram_id=? AND balance>=?
             """,
-            (amount, i)
+            (amount, i, amount),
         )
+
+        if c.execute("SELECT changes()").fetchone()[0] != 1:
+            c.rollback()
+            c.close()
+            await u.message.reply_text("â Ä°Ålem sÄ±rasÄ±nda bakiye deÄiÅti. Tekrar deneyin.")
+            return
 
         c.execute(
             """
             INSERT INTO withdrawals
-            (telegram_id,amount,wallet,status,created_at)
+            (telegram_id, amount, wallet, status, created_at)
             VALUES(?,?,?,?,?)
             """,
             (
                 i,
                 amount,
-                r["wallet"],
+                row["wallet"],
                 "pending",
-                datetime.now(timezone.utc).isoformat()
-            )
+                datetime.now(timezone.utc).isoformat(),
+            ),
         )
-
         c.commit()
         c.close()
 
         x.user_data["state"] = None
-
         await u.message.reply_text(
-            f"💸 *Çekim talebi oluşturuldu!*\n\n"
-            f"💰 Miktar: *{amount:g} HNK*\n"
-            f"👛 Cüzdan: `{r['wallet']}`\n"
-            f"📌 Durum: *Bekliyor*",
+            f"ð¸ *Ãekim talebi oluÅturuldu!*\n\n"
+            f"ð° Miktar: *{amount:g} HNK*\n"
+            f"ð CÃ¼zdan: `{row['wallet']}`\n"
+            f"ð Durum: *Bekliyor*",
             parse_mode="Markdown",
-            reply_markup=menu()
+            reply_markup=menu(),
         )
         return
 
 
-# =========================================================
-# ADMIN USER ACTION CALLBACKS
-# =========================================================
-
-async def admin_action_buttons(u, x):
-    pass
-
-
-# =========================================================
-# HEALTH SERVER
-# =========================================================
-
 class HealthHandler(BaseHTTPRequestHandler):
-
     def do_GET(self):
         self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write(
-            b"HNK Mining Bot OK"
-        )
+        self.wfile.write(b"HNK Mining Bot OK")
 
     def log_message(self, format, *args):
         pass
 
 
 def run_health_server():
-    port = int(
-        os.environ.get(
-            "PORT",
-            "10000"
-        )
-    )
-
-    server = HTTPServer(
-        ("0.0.0.0", port),
-        HealthHandler
-    )
-
+    port = int(os.environ.get("PORT", "10000"))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
     server.serve_forever()
 
 
-threading.Thread(
-    target=run_health_server,
-    daemon=True
-).start()
-
-
-# =========================================================
-# PATCH ADMIN USER ACTIONS INTO BUTTON HANDLER
-# =========================================================
-
-_original_buttons = buttons
-
-
-async def buttons(u, x):
-    q = u.callback_query
-    s = q.data
-    i = q.from_user.id
-
-    # Admin-only user action buttons
-    if s.startswith("usr_"):
-        await q.answer()
-
-        if not is_admin(i):
-            await q.answer(
-                "⛔ Yetkiniz yok.",
-                show_alert=True
-            )
-            return
-
-        uid = x.user_data.get("manage_user")
-
-        if not uid:
-            await q.message.reply_text(
-                "❌ Kullanıcı seçilmedi."
-            )
-            return
-
-        if s == "usr_balance":
-            x.user_data["state"] = "admin_balance"
-
-            await q.message.reply_text(
-                "💰 Bakiye değişikliği yaz.\n\n"
-                "Pozitif değer ekler:\n"
-                "`10`\n\n"
-                "Negatif değer düşer:\n"
-                "`-10`",
-                parse_mode="Markdown"
-            )
-            return
-
-        if s == "usr_ban":
-            c = db()
-
-            r = c.execute(
-                "SELECT banned FROM users WHERE telegram_id=?",
-                (uid,)
-            ).fetchone()
-
-            if not r:
-                c.close()
-
-                await q.message.reply_text(
-                    "❌ Kullanıcı bulunamadı."
-                )
-                return
-
-            new_status = 0 if r["banned"] else 1
-
-            c.execute(
-                """
-                UPDATE users
-                SET banned=?
-                WHERE telegram_id=?
-                """,
-                (new_status, uid)
-            )
-
-            c.commit()
-            c.close()
-
-            x.user_data["state"] = None
-
-            status_text = (
-                "🚫 Kullanıcı engellendi."
-                if new_status
-                else "✅ Kullanıcının engeli kaldırıldı."
-            )
-
-            await q.message.reply_text(
-                f"{status_text}\n\n"
-                f"🆔 {uid}",
-                reply_markup=admin_menu()
-            )
-            return
-
-    # Everything else uses main handler
-    await _original_buttons(u, x)
-
-
-# =========================================================
-# RUN
-# =========================================================
-
 def run():
     token = os.getenv("BOT_TOKEN")
-
     if not token:
-        raise RuntimeError(
-            "BOT_TOKEN bulunamadı"
-        )
+        raise RuntimeError("BOT_TOKEN bulunamadÄ±")
 
     init()
 
-    app = (
-        Application
-        .builder()
-        .token(token)
-        .build()
-    )
+    threading.Thread(
+        target=run_health_server,
+        daemon=True,
+    ).start()
 
-    app.add_handler(
-        CommandHandler(
-            "start",
-            start
-        )
-    )
+    app = Application.builder().token(token).build()
 
-    app.add_handler(
-        CommandHandler(
-            "admin",
-            admin
-        )
-    )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text))
 
-    app.add_handler(
-        CallbackQueryHandler(
-            buttons
-        )
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            text
-        )
-    )
-
-    print("HNK Mining Bot başlatılıyor...")
+    print("HNK Mining Bot baÅlatÄ±lÄ±yor...")
     print("Admin ID:", ADMIN_ID)
 
     app.run_polling()
