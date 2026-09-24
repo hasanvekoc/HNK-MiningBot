@@ -8,12 +8,13 @@ from datetime import datetime, timezone, timedelta
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-
 DB = os.getenv("HNK_DB", "hnk_mining.db")
+ADMIN_ID = 8769533867
 DAILY = 0.25
 BONUS = 1.0
 MIN_W = 10.0
-
+def is_admin(user_id):
+    return user_id == ADMIN_ID
 def db():
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
@@ -331,7 +332,18 @@ def run_health_server():
     server.serve_forever()
 
 threading.Thread(target=run_health_server, daemon=True).start()
+async def admin(u, x):
+    if not is_admin(u.effective_user.id):
+        await u.message.reply_text("⛔ Bu bölüm sadece yöneticiye açıktır.")
+        return
 
+    await u.message.reply_text(
+        "🛠 *HNK ADMIN PANELİ*\n\n"
+        "👑 Yönetici: Hasan\n"
+        "🆔 Admin ID: 8769533867\n\n"
+        "🔒 Yönetici yetkileri aktif.",
+        parse_mode="Markdown"
+    )
 def run():
     token = os.getenv("BOT_TOKEN")
     if not token:
@@ -339,6 +351,7 @@ def run():
     init()
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text))
     app.run_polling()
