@@ -153,7 +153,7 @@ async def buttons(u, x):
 
     r = user(i)
     s = q.data
-if s == "stars":
+    if s == "stars":
         await safe_edit(
             q,
             "⭐ *HNK Stars*\n\n"
@@ -165,7 +165,9 @@ if s == "stars":
             reply_markup=menu()
         )
         return
+
     if s == "mine":
+        now = datetime.now(timezone.utc)
         now = datetime.now(timezone.utc)
 
         if r["last_claim"] and now - datetime.fromisoformat(r["last_claim"]) < timedelta(hours=24):
