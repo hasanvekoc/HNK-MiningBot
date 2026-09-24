@@ -68,20 +68,20 @@ def add(u, ref=None):
 def menu():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("\u26cf\ufe0f Kaz\u0131maya Ba\u015fla", callback_data="mine"),
-            InlineKeyboardButton("\U0001f4b0 Bakiyem", callback_data="bal")
+            InlineKeyboardButton("⛏️ Madenciliği Başlat", callback_data="mine"),
+            InlineKeyboardButton("💰 Bakiyem", callback_data="bal")
         ],
         [
-            InlineKeyboardButton("\U0001f465 Referans", callback_data="ref"),
-            InlineKeyboardButton("\U0001f45b C\u00fczdan\u0131m", callback_data="wallet")
+            InlineKeyboardButton("👥 Arkadaşlarını Davet Et", callback_data="ref"),
+            InlineKeyboardButton("👛 Cüzdanım", callback_data="wallet")
         ],
         [
-            InlineKeyboardButton("\U0001f4b8 HNK \u00c7ek", callback_data="with"),
-            InlineKeyboardButton("\U0001f4ca \u0130statistik", callback_data="stats")
+            InlineKeyboardButton("⭐ HNK Stars", callback_data="stars"),
+            InlineKeyboardButton("📊 İstatistik", callback_data="stats")
         ],
         [
-            InlineKeyboardButton("\U0001f3c6 Liderlik", callback_data="lead"),
-            InlineKeyboardButton("\u2139\ufe0f HNK Hakk\u0131nda", callback_data="about")
+            InlineKeyboardButton("👑 Liderlik", callback_data="lead"),
+            InlineKeyboardButton("ℹ️ HNK Hakkında", callback_data="about")
         ]
     ])
 
